@@ -8,21 +8,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	email2 "github.com/jordan-wright/email"
+	"github.com/tinode/chat/server/logs"
+	"github.com/tinode/chat/server/store"
+	t "github.com/tinode/chat/server/store/types"
+	i18n "golang.org/x/text/language"
 	"math/rand"
-	qp "mime/quotedprintable"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	textt "text/template"
-
-	"github.com/tinode/chat/server/logs"
-	"github.com/tinode/chat/server/store"
-	t "github.com/tinode/chat/server/store/types"
-	i18n "golang.org/x/text/language"
 )
 
 // Validator configuration.
@@ -151,6 +151,11 @@ type emailContent struct {
 	subject string
 	html    string
 	plain   string
+}
+
+func (w *emailContent) Write(b []byte) (n int, err error) {
+	w.html += string(b)
+	return len(b), nil
 }
 
 func executeTemplate(template *textt.Template, params map[string]interface{}) (*emailContent, error) {
@@ -480,52 +485,28 @@ func (v *validator) Remove(user t.Uid, value string) error {
 
 // SendMail replacement
 //
-func (v *validator) sendMail(rcpt []string, msg []byte) error {
+func (v *validator) sendMail(rcpt []string, content *emailContent) error {
 
-	client, err := smtp.Dial(v.SMTPAddr + ":" + v.SMTPPort)
+	e := &email2.Email{
+		To:      rcpt,
+		From:    v.SendFrom,
+		Subject: content.subject,
+		HTML:    []byte(content.html),
+		Headers: textproto.MIMEHeader{},
+	}
+
+	var addr = fmt.Sprintf("%s:%s", v.SMTPAddr, v.SMTPPort)
+
+	err := e.SendWithTLS(addr, smtp.PlainAuth("", v.senderEmail, v.SenderPassword, v.SMTPAddr),
+		&tls.Config{InsecureSkipVerify: true, ServerName: "smtp.163.com"})
+
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
-	defer client.Close()
-	if err = client.Hello(v.SMTPHeloHost); err != nil {
-		return err
-	}
-	if istls, _ := client.Extension("STARTTLS"); istls {
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: v.TLSInsecureSkipVerify,
-			ServerName:         v.SMTPAddr,
-		}
-		if err = client.StartTLS(tlsConfig); err != nil {
-			return err
-		}
-	}
-	if v.auth != nil {
-		if isauth, _ := client.Extension("AUTH"); isauth {
-			err = client.Auth(v.auth)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if err = client.Mail(strings.ReplaceAll(strings.ReplaceAll(v.senderEmail, "\r", " "), "\n", " ")); err != nil {
-		return err
-	}
-	for _, to := range rcpt {
-		if err = client.Rcpt(strings.ReplaceAll(strings.ReplaceAll(to, "\r", " "), "\n", " ")); err != nil {
-			return err
-		}
-	}
-	w, err := client.Data()
-	if err != nil {
-		return err
-	}
-	if _, err = w.Write(msg); err != nil {
-		return err
-	}
-	if err = w.Close(); err != nil {
-		return err
-	}
-	return client.Quit()
+
+	return nil
+
 }
 
 // This is a basic SMTP sender which connects to a server using login/password.
@@ -535,55 +516,8 @@ func (v *validator) sendMail(rcpt []string, msg []byte) error {
 // -
 // Mailjet and SendGrid have some free email limits.
 func (v *validator) send(to string, content *emailContent) error {
-	message := &bytes.Buffer{}
 
-	// Common headers.
-	fmt.Fprintf(message, "From: %s\r\n", v.SendFrom)
-	fmt.Fprintf(message, "To: %s\r\n", to)
-	fmt.Fprintf(message, "Subject: %s\r\n", content.subject)
-	message.WriteString("MIME-version: 1.0;\r\n")
-
-	if content.html == "" {
-		// Plain text message
-		message.WriteString("Content-Type: text/plain; charset=\"UTF-8\"; format=flowed; delsp=yes\r\n")
-		message.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-		b64w := base64.NewEncoder(base64.StdEncoding, message)
-		b64w.Write([]byte(content.plain))
-		b64w.Close()
-	} else if content.plain == "" {
-		// HTML-formatted message
-		message.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
-		message.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-		qpw := qp.NewWriter(message)
-		qpw.Write([]byte(content.html))
-		qpw.Close()
-	} else {
-		// Multipart-alternative message includes both HTML and plain text components.
-		boundary := randomBoundary()
-		message.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n")
-
-		message.WriteString("--" + boundary + "\r\n")
-		message.WriteString("Content-Type: text/plain; charset=\"UTF-8\"; format=flowed; delsp=yes\r\n")
-		message.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-		b64w := base64.NewEncoder(base64.StdEncoding, message)
-		b64w.Write([]byte(content.plain))
-		b64w.Close()
-
-		message.WriteString("\r\n")
-
-		message.WriteString("--" + boundary + "\r\n")
-		message.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
-		message.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-		qpw := qp.NewWriter(message)
-		qpw.Write([]byte(content.html))
-		qpw.Close()
-
-		message.WriteString("\r\n--" + boundary + "--")
-	}
-
-	message.WriteString("\r\n")
-
-	err := v.sendMail([]string{to}, message.Bytes())
+	err := v.sendMail([]string{to}, content)
 	if err != nil {
 		logs.Warn.Println("SMTP error", to, err)
 	}

@@ -150,22 +150,22 @@ func stringSliceDelta(rold, rnew []string) (added, removed []string) {
 // restrictedTagsEqual checks if two sets of tags contain the same set of restricted tags:
 // true - same, false - different.
 func restrictedTagsEqual(oldTags, newTags []string, namespaces map[string]bool) bool {
-	rold := filterRestrictedTags(oldTags, namespaces)
-	rnew := filterRestrictedTags(newTags, namespaces)
-
-	if len(rold) != len(rnew) {
-		return false
-	}
-
-	sort.Strings(rold)
-	sort.Strings(rnew)
-
-	// Match old tags against the new tags.
-	for i := 0; i < len(rnew); i++ {
-		if rold[i] != rnew[i] {
-			return false
-		}
-	}
+	//rold := filterRestrictedTags(oldTags, namespaces)
+	//rnew := filterRestrictedTags(newTags, namespaces)
+	//
+	//if len(rold) != len(rnew) {
+	//	return false
+	//}
+	//
+	//sort.Strings(rold)
+	//sort.Strings(rnew)
+	//
+	//// Match old tags against the new tags.
+	//for i := 0; i < len(rnew); i++ {
+	//	if rold[i] != rnew[i] {
+	//		return false
+	//	}
+	//}
 
 	return true
 }

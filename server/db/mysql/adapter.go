@@ -9,17 +9,20 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"hash/fnv"
-	"strconv"
-	"strings"
-	"time"
-
 	ms "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog"
+	sqldblogger "github.com/simukti/sqldb-logger"
+	"github.com/simukti/sqldb-logger/logadapter/zerologadapter"
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/db/common"
 	"github.com/tinode/chat/server/store"
 	t "github.com/tinode/chat/server/store/types"
+	"hash/fnv"
+	"os"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // adapter holds MySQL connection data.
@@ -141,7 +144,27 @@ func (a *adapter) Open(jsonconfig json.RawMessage) error {
 	}
 
 	// This just initializes the driver but does not open the network connection.
-	a.db, err = sqlx.Open("mysql", a.dsn)
+	db, err := sql.Open("mysql", a.dsn)
+
+	// initiate zerolog
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	zlogger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	// prepare logger
+	loggerOptions := []sqldblogger.Option{
+		sqldblogger.WithSQLQueryFieldname("sql"),
+		sqldblogger.WithWrapResult(false),
+		sqldblogger.WithSQLQueryAsMessage(true),
+		sqldblogger.WithMinimumLevel(sqldblogger.LevelDebug),
+		sqldblogger.WithExecerLevel(sqldblogger.LevelDebug),
+		sqldblogger.WithQueryerLevel(sqldblogger.LevelDebug),
+		sqldblogger.WithPreparerLevel(sqldblogger.LevelDebug),
+	}
+	// handle err
+	loggerAdapter := zerologadapter.New(zlogger)
+	db = sqldblogger.OpenDriver(a.dsn, db.Driver(), loggerAdapter, loggerOptions...) // db is STILL *sql.DB
+	//sqldblogger.OpenDriver(a.dsn, db.Driver(), loggerAdapter, loggerOptions...)
+	a.db = sqlx.NewDb(db, "mysql")
+
 	if err != nil {
 		return err
 	}

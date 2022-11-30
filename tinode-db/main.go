@@ -183,6 +183,10 @@ func getPassword(n int) string {
 }
 
 func main() {
+
+	//loggerAdapter := zerologadapter.New(zerolog.New(os.Stdout))
+	//a.db = sqldblogger.OpenDriver(dsn, db.Driver(), loggerAdapter /*, using_default_options*/) // db is STILL *sql.DB
+
 	reset := flag.Bool("reset", false, "force database reset")
 	upgrade := flag.Bool("upgrade", false, "perform database version upgrade")
 	noInit := flag.Bool("no_init", false, "check that database exists but don't create if missing")
